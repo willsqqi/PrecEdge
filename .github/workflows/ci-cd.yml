@@ -1,83 +1,191 @@
-name: CI/CD
+name: CI
 
 on:
   pull_request:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      deploy:
-        description: "Build and deploy the GCP scanner image"
-        required: true
-        default: "false"
-        type: choice
-        options: ["false", "true"]
 
 permissions:
   contents: read
-  id-token: write
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
 
 env:
-  PYTHON_VERSION: "3.12"
-  PROJECT_ID: ${{ vars.GCP_PROJECT_ID || 'poly-x-kalshi' }}
-  REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  RUN_LIVE_MARKET_TESTS: "0"
+  RUN_LIVE_FIFA_ARBITRAGE_TESTS: "0"
+  RUN_LIVE_ARBITRAGE_TESTS: "0"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
 
 jobs:
-  test:
+  quality:
+    name: Code and workflow checks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install ".[dev,gcp,dashboard]"
-      - name: Run tests
-        run: python -m pytest -q
-      - name: Check offline research benchmark
-        run: |
-          python -m prediction_market.research.cli benchmark --output reports/research/matcher-benchmark.json
-      - name: Preserve synthetic benchmark evidence
-        uses: actions/upload-artifact@v4
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          name: synthetic-matcher-benchmark
-          path: reports/research/matcher-benchmark.json
-
-  terraform:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
-      - name: Terraform fmt
-        run: terraform -chdir=infra/gcp fmt -check
-      - name: Terraform validate
+          python-version: "3.12"
+      - name: Check Python code
         run: |
-          terraform -chdir=infra/gcp init -backend=false
-          terraform -chdir=infra/gcp validate
-
-  docker-build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build scanner image locally
-        run: docker build -f docker/Dockerfile.gcp-scanner -t poly-x-kalshi-scanner:ci .
-
-  deploy:
-    needs: [test, terraform, docker-build]
-    if: github.event_name == 'workflow_dispatch' && inputs.deploy == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: google-github-actions/auth@v2
-        with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
-      - uses: google-github-actions/setup-gcloud@v2
-      - uses: hashicorp/setup-terraform@v3
-      - name: Deploy scanner and daily pipeline
+          python -m pip install ruff==0.17.0
+          ruff check --isolated --select E9,F63,F7,F82 src tests scripts/validate_distribution.py
+          ruff check --isolated --select E4,E7,E9,F src/prediction_market/research tests/test_research_foundation.py scripts/validate_distribution.py tests/test_distribution.py
+          git diff --check
+      - name: Check GitHub Actions workflows
         env:
-          IMAGE_TAG: ${{ github.sha }}
-        run: ./scripts/deploy_gcp_scanner.sh
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          curl --fail --silent --show-error --location \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz \
+            --output "$RUNNER_TEMP/actionlint.tar.gz"
+          printf '%s  %s\n' "$ACTIONLINT_SHA256" "$RUNNER_TEMP/actionlint.tar.gz" | sha256sum --check
+          tar -xzf "$RUNNER_TEMP/actionlint.tar.gz" -C "$RUNNER_TEMP" actionlint
+          "$RUNNER_TEMP/actionlint" -color
+
+  test:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.12"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: macos-latest
+            python: "3.12"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install local test dependencies
+        run: python -m pip install ".[test]"
+      - name: Run offline tests
+        run: python -m pytest -q --junitxml=reports/ci/junit.xml
+      - name: Verify synthetic matching benchmark
+        run: precedge-research benchmark --output reports/ci/matcher-benchmark.json
+      - name: Preserve test and benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: evidence-${{ matrix.os }}-py${{ matrix.python }}
+          path: reports/ci/
+          retention-days: 30
+          if-no-files-found: warn
+
+  package:
+    name: Build and verify distributions
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Build wheel and source distribution
+        run: |
+          python -m pip install build==1.6.1 twine==7.0.0
+          python -m build
+          python -m twine check --strict dist/*
+          python scripts/validate_distribution.py --dist dist
+      - name: Smoke test the installed wheel outside the checkout
+        run: |
+          python -m venv "$RUNNER_TEMP/wheel-smoke"
+          "$RUNNER_TEMP/wheel-smoke/bin/python" -m pip install --no-deps dist/*.whl
+          mkdir -p "$RUNNER_TEMP/wheel-smoke-run"
+          cd "$RUNNER_TEMP/wheel-smoke-run"
+          env -u PYTHONPATH -u PYTHONHOME "$RUNNER_TEMP/wheel-smoke/bin/precedge-research" benchmark \
+            --output installed-benchmark.json
+          cp installed-benchmark.json "$GITHUB_WORKSPACE/dist/installed-benchmark.json"
+      - name: Stage candidate distributions
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: candidate-distributions
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  deliver:
+    name: Deliver tested builds
+    needs: [quality, test, package]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: candidate-distributions
+          path: dist
+      - name: Record successful validation
+        env:
+          CHECKOUT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          report = {
+              "status": "all CI checks passed",
+              "checkout_sha": os.environ["CHECKOUT_SHA"],
+              "run_id": os.environ["RUN_ID"],
+              "run_attempt": os.environ["RUN_ATTEMPT"],
+              "checks": ["quality", "test matrix", "package", "installed wheel benchmark"],
+          }
+          Path("dist/validation.json").write_text(json.dumps(report, indent=2) + "\n")
+          PY
+      - name: Publish downloadable tested builds
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tested-distributions-${{ github.sha }}
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Explain the build artifact
+        run: |
+          printf '%s\n' \
+            '## Downloadable builds' \
+            'All code checks, matrix tests, packaging checks and the installed-wheel benchmark passed.' \
+            'Download the tested-distributions artifact from this run for the wheel, source archive, checksums and validation record.' \
+            'This workflow does not publish to PyPI, deploy cloud services or place orders.' >> "$GITHUB_STEP_SUMMARY"
+
+  required:
+    name: CI passed
+    if: always()
+    needs: [quality, test, package, deliver]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to succeed
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          TEST_RESULT: ${{ needs.test.result }}
+          PACKAGE_RESULT: ${{ needs.package.result }}
+          DELIVERY_RESULT: ${{ needs.deliver.result }}
+        run: |
+          for result in "$QUALITY_RESULT" "$TEST_RESULT" "$PACKAGE_RESULT" "$DELIVERY_RESULT"; do
+            if [[ "$result" != "success" ]]; then
+              printf 'A required CI job did not succeed: %s\n' "$result" >&2
+              exit 1
+            fi
+          done
