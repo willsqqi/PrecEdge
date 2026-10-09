@@ -31,3 +31,12 @@ generated-data results are not evidence of trading profitability. Paper trading
 and dashboard integration are planned as separate review phases.
 
 See [workflow, commands, evidence requirements and limitations](docs/research_rollout.md).
+
+## CI and build delivery
+
+GitHub Actions runs the offline suite on Linux and macOS, checks the research
+benchmark, and verifies built Python packages. Successful runs provide tested
+wheel/source downloads, content checksums and validation evidence. Cloud
+deployment is separate from this local build pipeline.
+
+See [checks, downloads and local commands](docs/ci_cd.md).
