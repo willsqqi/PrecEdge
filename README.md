@@ -13,3 +13,21 @@ The platform turns fragmented market data into comparable datasets, helping user
 - **Price analysis:** Evaluate cross-market price gaps with liquidity, fee, and slippage considerations.
 - **Monitoring:** Explore market coverage, review matched pairs, and track signals through a dashboard.
 - **Historical analysis:** Preserve snapshots and signals to evaluate market behavior and inform trading strategy development.
+
+## Offline research foundation
+
+The first phase of the infrastructure upgrade adds reviewed contract evidence,
+bounded IDF candidate retrieval, settlement-equivalence checks, and a reproducible
+synthetic benchmark. Missing or conflicting rules block an identical verdict;
+similarity alone never approves a contract pair.
+
+```bash
+python -m prediction_market.research.cli benchmark \
+  --output reports/research/matcher-benchmark.json
+```
+
+The benchmark runs without accounts, network access or cloud services. Its
+generated-data results are not evidence of trading profitability. Paper trading
+and dashboard integration are planned as separate review phases.
+
+See [workflow, commands, evidence requirements and limitations](docs/research_rollout.md).

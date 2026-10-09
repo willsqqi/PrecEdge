@@ -37,6 +37,14 @@ jobs:
           python -m pip install ".[dev,gcp,dashboard]"
       - name: Run tests
         run: python -m pytest -q
+      - name: Check offline research benchmark
+        run: |
+          python -m prediction_market.research.cli benchmark --output reports/research/matcher-benchmark.json
+      - name: Preserve synthetic benchmark evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: synthetic-matcher-benchmark
+          path: reports/research/matcher-benchmark.json
 
   terraform:
     runs-on: ubuntu-latest
