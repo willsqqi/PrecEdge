@@ -5,7 +5,9 @@
 Each phase has a separate draft PR. Codex implements and tests that phase, writes
 a short explanation of the resulting behavior and its limits, and links the PR
 for review. The user reviews the diff and supplies comments. Codex addresses those
-comments before moving to the next phase. Merging, deployment, and trading need a
+comments in the corresponding PR. The user has authorized continued iterations:
+each PR gets complete tests, a successful CI checkpoint and updated documentation
+before the next PR opens. Dependent changes use explicit stacked PR bases. Merging, deployment, and trading need a
 separate user instruction; opening a PR does not perform any of them.
 
 Existing uncommitted work stays in the primary checkout. Phase 1 is developed in
@@ -144,7 +146,14 @@ ambiguous wording, missing sources, stale rules, different cancellation windows
 and different sports' draw policies. No profitability claim follows from either
 the synthetic benchmark or an `identical` match.
 
-## Planned phase 2 constraints
+## Phase 2 delivery checkpoints
+
+Phase 2 is split into recorded-book/fee execution primitives, followed by
+persistent replay, risk and settlement accounting. See [paper trading](paper_trading.md)
+for the implemented assumptions and validation. Each checkpoint remains a
+separate PR; CI/build delivery is reviewed independently.
+
+## Phase 2 constraints
 
 - Use replay time, not wall time, for stale-book checks, caps and cooldowns.
 - Use asks and visible levels for buys. Never fill an arbitrary size at the best
