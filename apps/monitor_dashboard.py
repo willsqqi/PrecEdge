@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from prediction_market.research.dashboard import render as render_paper_experiment
 from prediction_market.cloud_db import load_approved_mappings_from_db
 from prediction_market.dashboard_data import (
     TableLoadResult,
@@ -63,6 +64,7 @@ def main() -> None:
             _clear_review_session_state()
             st.rerun()
 
+        paper_database = st.text_input("Local paper database", value=os.getenv("PRECEDGE_PAPER_DATABASE", str(PROJECT_ROOT / "reports" / "paper-demo" / "paper.sqlite")))
         st.header("Signal Filters")
         search = st.text_input("Search event/pair", value="")
         min_edge = st.number_input("Minimum net edge", value=-1.0, step=0.01, format="%.3f")
@@ -106,9 +108,12 @@ def main() -> None:
             f"{latest_run.get('alert_count', 'n/a')} executable alerts."
         )
 
-    review_tab, overview_tab, viability_tab, coverage_tab, signals_tab, pairs_tab, orderbook_tab, discovery_tab, runs_tab = st.tabs(
-        ["Review Queue", "Overview", "Viability", "Coverage", "Signals", "Pairs", "Orderbooks", "Discovery", "Runs"]
+    review_tab, overview_tab, viability_tab, coverage_tab, signals_tab, pairs_tab, orderbook_tab, discovery_tab, runs_tab, paper_tab = st.tabs(
+        ["Review Queue", "Overview", "Viability", "Coverage", "Signals", "Pairs", "Orderbooks", "Discovery", "Runs", "Paper Research"]
     )
+
+    with paper_tab:
+        render_paper_experiment(Path(paper_database).expanduser())
 
     review_sources = {
         "approval_candidates": tables["approval_candidates"].source_path or tables["approval_candidates"].error or "not loaded",

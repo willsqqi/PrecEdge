@@ -58,7 +58,7 @@ def exposures(state: dict) -> dict[str, Decimal]:
 class ReplayLedger:
     """One immutable experiment per database; changed evidence needs a new DB."""
 
-    def __init__(self, path: Path, contracts: list[Contract], fees: list[FeeSchedule], config: ReplayConfig):
+    def __init__(self, path: Path, contracts: list[Contract], fees: list[FeeSchedule], config: ReplayConfig, provenance: dict | None = None):
         self.contracts = {c.key: c for c in contracts}
         self.fees = {f.contract_key: f for f in fees}
         self.config = config
@@ -66,9 +66,10 @@ class ReplayLedger:
             raise ValueError("nonempty unique contracts and unique fee schedules required")
         if set(self.fees) - set(self.contracts):
             raise ValueError("fee schedule references an unknown contract")
-        header = {"schema_version": 1, "config": asdict(config),
+        header = {"schema_version": 1, "engine_version": 1, "provenance": provenance or {}, "config": asdict(config),
                   "contracts": {key: asdict(c) for key, c in sorted(self.contracts.items())},
                   "fees": {key: f.to_dict() for key, f in sorted(self.fees.items())}}
+        self.provenance = provenance or {}
         self.fingerprint = digest(header)
         path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(path, timeout=30, isolation_level=None)
@@ -78,9 +79,16 @@ class ReplayLedger:
             self.db.execute("BEGIN IMMEDIATE")
             self.db.execute("CREATE TABLE IF NOT EXISTS experiment (id INTEGER PRIMARY KEY CHECK(id=1), fingerprint TEXT NOT NULL, header TEXT NOT NULL, state TEXT NOT NULL)")
             self.db.execute("CREATE TABLE IF NOT EXISTS events (event_id TEXT PRIMARY KEY, digest TEXT NOT NULL, payload TEXT NOT NULL, result TEXT NOT NULL)")
-            existing = self.db.execute("SELECT fingerprint FROM experiment WHERE id=1").fetchone()
+            existing = self.db.execute("SELECT fingerprint,header FROM experiment WHERE id=1").fetchone()
+            if existing and digest(json.loads(existing[1])) != existing[0]:
+                raise ValueError("experiment header fingerprint mismatch")
             if existing and existing[0] != self.fingerprint:
-                raise ValueError("experiment inputs changed; use a new database")
+                # Phase 2 headers predate optional provenance; retain their original
+                # fingerprint when the complete original inputs still agree.
+                legacy = {key: value for key, value in header.items() if key not in {"provenance", "engine_version"}}
+                if provenance or existing[0] != digest(legacy) or "engine_version" in json.loads(existing[1]):
+                    raise ValueError("experiment inputs changed; use a new database")
+                self.fingerprint = existing[0]
             if not existing:
                 state = {"cash": config.initial_cash, "books": {}, "remaining": {},
                          "positions": [], "settlements": {}, "last_at": None,
@@ -265,7 +273,7 @@ class ReplayLedger:
             if records[0]["yes"] != records[1]["yes"]:
                 divergent.append(p["position_id"])
         return {"schema_version": 1, "experiment_fingerprint": self.fingerprint,
-                "simulation_only": True, "execution_assumption": "simultaneous_full_two_leg_recorded_asks",
+                "provenance": self.provenance, "simulation_only": True, "execution_assumption": "simultaneous_full_two_leg_recorded_asks",
                 "config": asdict(self.config), "cash": state["cash"], "initial_cash": self.config.initial_cash,
                 "realized_pnl": str(realized), "open_positions": len(open_positions(state)),
                 "closed_positions": len(closed), "unresolved_cost": str(sum(exposures(state).values(), Decimal(0))),
@@ -273,3 +281,23 @@ class ReplayLedger:
                 "reconciliation_passed": money(state["cash"]) == expected_cash,
                 "divergent_settlements": divergent, "kill_switch": state["kill_switch"],
                 "last_replay_at": state["last_at"], "positions": positions, "decisions": decisions}
+
+
+def read_report(path: Path) -> dict:
+    """Read an existing experiment without creating a database or replaying events."""
+    connection = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, isolation_level=None)
+    try:
+        row = connection.execute("SELECT fingerprint,header FROM experiment WHERE id=1").fetchone()
+        if row is None:
+            raise ValueError("missing experiment header")
+        header = json.loads(row[1])
+        if digest(header) != row[0] or header.get("engine_version", 1) != 1:
+            raise ValueError("unsupported or changed experiment header")
+        ledger = ReplayLedger.__new__(ReplayLedger)
+        ledger.db = connection
+        ledger.fingerprint = row[0]
+        ledger.config = ReplayConfig(**header["config"])
+        ledger.provenance = header.get("provenance", {})
+        return ledger.report()
+    finally:
+        connection.close()

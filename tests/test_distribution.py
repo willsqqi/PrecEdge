@@ -23,7 +23,7 @@ def artifacts(root: Path, *, missing: str = "", extra: str = "", link: bool = Fa
     wheel = root / "example.whl"
     source = root / "example.tar.gz"
     wheel_files = {f"prediction_market/research/{name}": "# source\n" for name in distribution.RESEARCH_FILES}
-    wheel_files["example.dist-info/entry_points.txt"] = "[console_scripts]\nprecedge-research = prediction_market.research.cli:main\n"
+    wheel_files["example.dist-info/entry_points.txt"] = "[console_scripts]\nprecedge-research = prediction_market.research.cli:main\nprecedge-paper-dashboard = prediction_market.research.dashboard:launch\n"
     wheel_files.pop(missing, None)
     if extra:
         wheel_files[extra] = "should never be shipped"
@@ -32,7 +32,7 @@ def artifacts(root: Path, *, missing: str = "", extra: str = "", link: bool = Fa
             archive.writestr(name, text)
     source_files = {
         "pyproject.toml", "README.md", "docs/research_rollout.md", "docs/ci_cd.md",
-        "scripts/validate_distribution.py",
+        "scripts/validate_distribution.py", "docs/paper_trading.md", "docs/saved_book_research.md",
         "tests/fixtures/oddsportal_sample.html",
         *(f"src/prediction_market/research/{name}" for name in distribution.RESEARCH_FILES),
     }
@@ -66,7 +66,7 @@ def test_complete_distributions_record_content_hashes(tmp_path: Path, monkeypatc
 
 @pytest.mark.parametrize("missing", [
     "prediction_market/research/cli.py", "example.dist-info/entry_points.txt",
-    "docs/ci_cd.md", "tests/fixtures/oddsportal_sample.html",
+    "docs/ci_cd.md", "docs/saved_book_research.md", "tests/fixtures/oddsportal_sample.html",
 ])
 def test_incomplete_distributions_fail_validation(tmp_path: Path, missing: str) -> None:
     artifacts(tmp_path, missing=missing)
