@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 FORBIDDEN_PARTS = {"data", "reports", "output", ".local", ".git", ".venv", "site", "infra"}
-RESEARCH_FILES = {"__init__.py", "contracts.py", "matching.py", "benchmark.py", "cli.py", "books.py", "execution.py"}
+RESEARCH_FILES = {"__init__.py", "contracts.py", "matching.py", "benchmark.py", "cli.py", "books.py", "execution.py", "replay.py", "demo.py"}
 
 
 def verify_paths(paths: list[str]) -> None:

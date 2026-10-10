@@ -40,3 +40,5 @@ wheel/source downloads, content checksums and validation evidence. Cloud
 deployment is separate from this local build pipeline.
 
 See [checks, downloads and local commands](docs/ci_cd.md).
+
+Paper execution and persistent replay: [recorded-book research guide](docs/paper_trading.md). Run `precedge-research paper-demo --directory reports/paper-demo` for a fictional accounting experiment.
