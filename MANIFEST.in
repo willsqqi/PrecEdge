@@ -2,3 +2,4 @@ include docs/research_rollout.md
 include docs/ci_cd.md
 include scripts/validate_distribution.py
 recursive-include tests/fixtures *.html
+include docs/paper_trading.md
