@@ -44,6 +44,7 @@ dashboard = [
 where = ["src"]
 
 [project.scripts]
+precedge-paper-dashboard = "prediction_market.research.dashboard:launch"
 precedge-research = "prediction_market.research.cli:main"
 prediction-market-etl = "prediction_market.aws_etl.cli:main"
 prediction-market-backfill = "prediction_market.aws_etl.batch_driver:main"

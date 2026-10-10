@@ -24,6 +24,19 @@ Phase 1 is additive. Existing discovery, hosted embedding options, manual review
 and price scanners retain their current behavior. The new contract templates do
 not inherit approval from a high similarity score or an AI recommendation.
 
+## Review order and implemented checkpoints
+
+The foundation PR has been merged. CI/build delivery is reviewed separately,
+followed by phase 2a (book depth and fee primitives), phase 2b (persistent replay
+and risk accounting), and phase 3 (saved scanner bridge and read-only dashboard).
+Each dependent PR is based on the previous branch so its diff stays focused.
+After merging a predecessor, retarget the next PR to main and rerun CI. Opening
+all checkpoints does not merge them or begin live trading.
+
+See [saved-book research](saved_book_research.md) for the complete local pipeline.
+Real archived books still require actual as-of contract/binding reviews and fee
+metadata; synthetic fixtures are validation inputs, not performance evidence.
+
 ## Architecture
 
 ```text

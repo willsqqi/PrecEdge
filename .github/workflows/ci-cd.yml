@@ -92,6 +92,24 @@ jobs:
           retention-days: 30
           if-no-files-found: warn
 
+  dashboard:
+    name: Paper dashboard smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Verify the rendered paper experiment view
+        run: |
+          python -m pip install ".[test,dashboard]"
+          python -m pytest -q tests/test_paper_dashboard.py
+
   package:
     name: Build and verify distributions
     runs-on: ubuntu-latest
@@ -131,7 +149,7 @@ jobs:
 
   deliver:
     name: Deliver tested builds
-    needs: [quality, test, package]
+    needs: [quality, test, dashboard, package]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -153,7 +171,7 @@ jobs:
               "checkout_sha": os.environ["CHECKOUT_SHA"],
               "run_id": os.environ["RUN_ID"],
               "run_attempt": os.environ["RUN_ATTEMPT"],
-              "checks": ["quality", "test matrix", "package", "installed wheel benchmark"],
+              "checks": ["quality", "test matrix", "dashboard", "package", "installed wheel benchmark"],
           }
           Path("dist/validation.json").write_text(json.dumps(report, indent=2) + "\n")
           PY
@@ -175,7 +193,7 @@ jobs:
   required:
     name: CI passed
     if: always()
-    needs: [quality, test, package, deliver]
+    needs: [quality, test, dashboard, package, deliver]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -183,10 +201,11 @@ jobs:
         env:
           QUALITY_RESULT: ${{ needs.quality.result }}
           TEST_RESULT: ${{ needs.test.result }}
+          DASHBOARD_RESULT: ${{ needs.dashboard.result }}
           PACKAGE_RESULT: ${{ needs.package.result }}
           DELIVERY_RESULT: ${{ needs.deliver.result }}
         run: |
-          for result in "$QUALITY_RESULT" "$TEST_RESULT" "$PACKAGE_RESULT" "$DELIVERY_RESULT"; do
+          for result in "$QUALITY_RESULT" "$TEST_RESULT" "$DASHBOARD_RESULT" "$PACKAGE_RESULT" "$DELIVERY_RESULT"; do
             if [[ "$result" != "success" ]]; then
               printf 'A required CI job did not succeed: %s\n' "$result" >&2
               exit 1

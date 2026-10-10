@@ -16,7 +16,8 @@ before merging it. The existing three-phase rollout still applies.
 | Test matrix | Complete offline suite on Linux/Python 3.11, 3.12, 3.13 and macOS/Python 3.12 |
 | Synthetic benchmark | Recover the planted matches with no false positives on each matrix runner; preserve the machine/config/timing evidence |
 | Build and verify distributions | Build sdist and wheel, check metadata, inspect their contents, and smoke-test matching plus paper replay from the installed wheel in a separate empty directory |
-| Deliver tested builds | Publish a tested build artifact only after code checks, every matrix entry and packaging succeed |
+| Paper dashboard smoke test | Render the optional Streamlit view and inspect metrics/refusals/missing-file behavior |
+| Deliver tested builds | Publish a tested build artifact only after code checks, every matrix entry, the dashboard smoke test and packaging succeed |
 | CI passed | Fail if any required job fails, is cancelled or is skipped |
 
 The `test` extra installs pytest without the notebook, optional cloud or dashboard

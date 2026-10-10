@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import sys
@@ -13,8 +14,9 @@ from .benchmark import run_benchmark
 from .contracts import Contract, VENUES
 from .matching import MatcherConfig, match_report
 from .books import FeeSchedule
-from .replay import ReplayConfig, ReplayLedger
+from .replay import ReplayConfig, ReplayLedger, read_report
 from .demo import run_demo
+from .integration import compile_scan
 import sqlite3
 
 
@@ -99,25 +101,65 @@ def main(argv: list[str] | None = None) -> int:
     paper.add_argument("--events", type=Path, required=True)
     paper.add_argument("--database", type=Path, required=True)
     paper.add_argument("--config", type=Path)
+    paper.add_argument("--experiment-report", type=Path, help="Retain provenance when appending events to a saved-book scan.")
     paper.add_argument("--output", type=Path, required=True)
     demo = commands.add_parser("paper-demo", help="Create and verify a fictional experiment in a new directory.")
     demo.add_argument("--directory", type=Path, required=True)
+    scan = commands.add_parser("paper-scan", help="Replay reviewed pairs from saved scanner raw orderbooks.")
+    scan.add_argument("--contracts", type=Path, required=True)
+    scan.add_argument("--bindings", type=Path, required=True)
+    scan.add_argument("--snapshots", type=Path, required=True)
+    scan.add_argument("--fees", type=Path, required=True)
+    scan.add_argument("--config", type=Path)
+    scan.add_argument("--quantity", type=int, default=1)
+    scan.add_argument("--database", type=Path, required=True)
+    scan.add_argument("--output", type=Path, required=True)
+    inspect = commands.add_parser("paper-report", help="Export an existing ledger without replay or writes.")
+    inspect.add_argument("--database", type=Path, required=True)
+    inspect.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
         if args.command == "paper-demo":
             report = run_demo(args.directory)
             print(json.dumps({k: report[k] for k in ("demo_correctness_passed", "data_kind", "cash", "realized_pnl", "reconciliation_passed")}))
             return 0 if report["demo_correctness_passed"] else 1
+        if args.command == "paper-report":
+            if args.output.resolve() == args.database.resolve():
+                raise ValueError("output must not overwrite the database")
+            report = read_report(args.database)
+            write_atomic(args.output, json.dumps(report, indent=2, sort_keys=True) + "\n")
+            return 0 if report["reconciliation_passed"] else 1
+        if args.command == "paper-scan":
+            import pandas as pd
+
+            inputs = [args.contracts, args.bindings, args.snapshots, args.fees] + ([args.config] if args.config else [])
+            if args.output.resolve() in {p.resolve() for p in inputs + [args.database]} or args.database.resolve() in {p.resolve() for p in inputs}:
+                raise ValueError("database/output must not overwrite an input or each other")
+            frame = pd.read_parquet(args.snapshots) if args.snapshots.suffix == ".parquet" else pd.read_csv(args.snapshots, dtype=str, keep_default_na=False)
+            rows = frame.fillna("").to_dict(orient="records")
+            contracts = load_contracts(args.contracts)
+            events, provenance = compile_scan(contracts, json.loads(args.bindings.read_text()), rows, args.quantity)
+            provenance["source_file_sha256"] = hashlib.sha256(args.snapshots.read_bytes()).hexdigest()
+            fees = [FeeSchedule(**row) for row in json.loads(args.fees.read_text())]
+            config = ReplayConfig(**json.loads(args.config.read_text())) if args.config else ReplayConfig()
+            with ReplayLedger(args.database, contracts, fees, config, provenance) as ledger:
+                for event in events:
+                    ledger.process(event)
+                report = ledger.report()
+            write_atomic(args.output, json.dumps(report, indent=2, sort_keys=True) + "\n")
+            print(json.dumps({"open_positions": report["open_positions"], "realized_pnl": report["realized_pnl"], "provenance": provenance}))
+            return 0 if report["reconciliation_passed"] else 1
         source = getattr(args, "contracts", None) or getattr(args, "candidates", None)
         if source is not None and source.resolve() == args.output.resolve():
             raise ValueError("output must not overwrite the input")
         if args.command == "paper-replay":
-            inputs = [args.contracts, args.fees, args.events] + ([args.config] if args.config else [])
+            inputs = [args.contracts, args.fees, args.events] + ([args.config] if args.config else []) + ([args.experiment_report] if args.experiment_report else [])
             if args.output.resolve() in {p.resolve() for p in inputs + [args.database]} or args.database.resolve() in {p.resolve() for p in inputs}:
                 raise ValueError("database/output must not overwrite an input or each other")
             config = ReplayConfig(**json.loads(args.config.read_text())) if args.config else ReplayConfig()
             fees = [FeeSchedule(**row) for row in json.loads(args.fees.read_text())]
-            with ReplayLedger(args.database, load_contracts(args.contracts), fees, config) as ledger:
+            provenance = json.loads(args.experiment_report.read_text())["provenance"] if args.experiment_report else {}
+            with ReplayLedger(args.database, load_contracts(args.contracts), fees, config, provenance) as ledger:
                 for number, line in enumerate(args.events.read_text().splitlines(), 1):
                     if not line.strip():
                         continue

@@ -11,7 +11,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 
 FORBIDDEN_PARTS = {"data", "reports", "output", ".local", ".git", ".venv", "site", "infra"}
-RESEARCH_FILES = {"__init__.py", "contracts.py", "matching.py", "benchmark.py", "cli.py", "books.py", "execution.py", "replay.py", "demo.py"}
+RESEARCH_FILES = {"__init__.py", "contracts.py", "matching.py", "benchmark.py", "cli.py", "books.py", "execution.py", "replay.py", "demo.py", "integration.py", "dashboard.py"}
 
 
 def verify_paths(paths: list[str]) -> None:
@@ -38,6 +38,8 @@ def validate(dist: Path) -> dict:
         entrypoints = [name for name in names if name.endswith(".dist-info/entry_points.txt")]
         if len(entrypoints) != 1 or "precedge-research = prediction_market.research.cli:main" not in archive.read(entrypoints[0]).decode():
             raise ValueError("wheel is missing the research CLI entry point")
+        if "precedge-paper-dashboard = prediction_market.research.dashboard:launch" not in archive.read(entrypoints[0]).decode():
+            raise ValueError("wheel is missing the paper dashboard entry point")
     with tarfile.open(source, "r:gz") as archive:
         members = archive.getmembers()
         names = [member.name for member in members]
@@ -51,6 +53,7 @@ def validate(dist: Path) -> dict:
         required = {
             f"{root}/pyproject.toml", f"{root}/README.md",
             f"{root}/docs/research_rollout.md", f"{root}/docs/ci_cd.md",
+            f"{root}/docs/paper_trading.md", f"{root}/docs/saved_book_research.md",
             f"{root}/scripts/validate_distribution.py",
             f"{root}/tests/fixtures/oddsportal_sample.html",
             *(f"{root}/src/prediction_market/research/{name}" for name in RESEARCH_FILES),
