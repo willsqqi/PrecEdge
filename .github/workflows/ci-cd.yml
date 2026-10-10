@@ -117,6 +117,9 @@ jobs:
           cd "$RUNNER_TEMP/wheel-smoke-run"
           env -u PYTHONPATH -u PYTHONHOME "$RUNNER_TEMP/wheel-smoke/bin/precedge-research" benchmark \
             --output installed-benchmark.json
+          env -u PYTHONPATH -u PYTHONHOME "$RUNNER_TEMP/wheel-smoke/bin/precedge-research" paper-demo \
+            --directory paper-demo
+          cp paper-demo/report.json "$GITHUB_WORKSPACE/dist/installed-paper-demo.json"
           cp installed-benchmark.json "$GITHUB_WORKSPACE/dist/installed-benchmark.json"
       - name: Stage candidate distributions
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

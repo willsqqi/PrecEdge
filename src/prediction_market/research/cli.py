@@ -12,6 +12,10 @@ from pathlib import Path
 from .benchmark import run_benchmark
 from .contracts import Contract, VENUES
 from .matching import MatcherConfig, match_report
+from .books import FeeSchedule
+from .replay import ReplayConfig, ReplayLedger
+from .demo import run_demo
+import sqlite3
 
 
 def load_contracts(path: Path) -> list[Contract]:
@@ -89,11 +93,42 @@ def main(argv: list[str] | None = None) -> int:
     bench.add_argument("--planted", type=int, default=100)
     bench.add_argument("--seed", type=int, default=20261009)
     bench.add_argument("--output", type=Path, required=True)
+    paper = commands.add_parser("paper-replay", help="Replay local JSONL events into a persistent paper ledger.")
+    paper.add_argument("--contracts", type=Path, required=True)
+    paper.add_argument("--fees", type=Path, required=True)
+    paper.add_argument("--events", type=Path, required=True)
+    paper.add_argument("--database", type=Path, required=True)
+    paper.add_argument("--config", type=Path)
+    paper.add_argument("--output", type=Path, required=True)
+    demo = commands.add_parser("paper-demo", help="Create and verify a fictional experiment in a new directory.")
+    demo.add_argument("--directory", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
+        if args.command == "paper-demo":
+            report = run_demo(args.directory)
+            print(json.dumps({k: report[k] for k in ("demo_correctness_passed", "data_kind", "cash", "realized_pnl", "reconciliation_passed")}))
+            return 0 if report["demo_correctness_passed"] else 1
         source = getattr(args, "contracts", None) or getattr(args, "candidates", None)
         if source is not None and source.resolve() == args.output.resolve():
             raise ValueError("output must not overwrite the input")
+        if args.command == "paper-replay":
+            inputs = [args.contracts, args.fees, args.events] + ([args.config] if args.config else [])
+            if args.output.resolve() in {p.resolve() for p in inputs + [args.database]} or args.database.resolve() in {p.resolve() for p in inputs}:
+                raise ValueError("database/output must not overwrite an input or each other")
+            config = ReplayConfig(**json.loads(args.config.read_text())) if args.config else ReplayConfig()
+            fees = [FeeSchedule(**row) for row in json.loads(args.fees.read_text())]
+            with ReplayLedger(args.database, load_contracts(args.contracts), fees, config) as ledger:
+                for number, line in enumerate(args.events.read_text().splitlines(), 1):
+                    if not line.strip():
+                        continue
+                    try:
+                        ledger.process(json.loads(line))
+                    except (ValueError, TypeError, KeyError) as exc:
+                        raise ValueError(f"{args.events}:{number}: {exc}") from exc
+                report = ledger.report()
+            write_atomic(args.output, json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
+            print(json.dumps({k: v for k, v in report.items() if k not in {"positions", "decisions"}}, sort_keys=True))
+            return 0 if report["reconciliation_passed"] else 1
         if args.command == "prepare-contracts":
             contracts = prepare_contracts(args.candidates)
             write_atomic(args.output, "".join(json.dumps(asdict(c), sort_keys=True) + "\n" for c in contracts))
@@ -116,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
         write_atomic(args.output, json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n")
         print(json.dumps({k: v for k, v in report.items() if k != "matches"}, sort_keys=True))
         return 1 if report.get("correctness_passed") is False else 0
-    except (ValueError, TypeError, OSError) as exc:
+    except (ValueError, TypeError, KeyError, OSError, sqlite3.Error) as exc:
         print(f"research: {exc}", file=sys.stderr)
         return 2
 

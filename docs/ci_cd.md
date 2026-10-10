@@ -15,7 +15,7 @@ before merging it. The existing three-phase rollout still applies.
 | Code and workflow checks | Fatal Python errors across source/tests, standard lint on research and distribution-validation code, and actionlint on all workflow files |
 | Test matrix | Complete offline suite on Linux/Python 3.11, 3.12, 3.13 and macOS/Python 3.12 |
 | Synthetic benchmark | Recover the planted matches with no false positives on each matrix runner; preserve the machine/config/timing evidence |
-| Build and verify distributions | Build sdist and wheel, check metadata, inspect their contents, and smoke-test the installed wheel in a separate empty directory |
+| Build and verify distributions | Build sdist and wheel, check metadata, inspect their contents, and smoke-test matching plus paper replay from the installed wheel in a separate empty directory |
 | Deliver tested builds | Publish a tested build artifact only after code checks, every matrix entry and packaging succeed |
 | CI passed | Fail if any required job fails, is cancelled or is skipped |
 
@@ -40,6 +40,7 @@ named `tested-distributions-<checkout SHA>`. It contains:
   and the tested checkout commit.
 - `installed-benchmark.json`, produced by the wheel-installed CLI with no source
   checkout or runtime dependencies available.
+- `installed-paper-demo.json`, verifying the fictional replay, refusal and cash/settlement accounting fixture.
 - `validation.json`, recording the successful CI jobs and workflow run.
 
 The tested artifact and per-platform `evidence-*` reports are retained for 30
